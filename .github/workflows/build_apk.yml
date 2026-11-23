@@ -40,12 +40,18 @@ jobs:
         working-directory: ${{ env.APP_DIR }}
         run: flutter create --platforms=android --org com.msqlitenet --project-name msq_litenet_app .
 
-      - name: Configure Android Manifest and Gradle
+      - name: Install dependencies
+        working-directory: ${{ env.APP_DIR }}
+        run: flutter pub get
+
+      - name: Configure Android Manifest, Gradle, and Plugin JVM Targets
         working-directory: ${{ env.APP_DIR }}
         run: |
           python3 - << 'EOF'
+          import json
           import re
           from pathlib import Path
+          from urllib.parse import urlparse, unquote
 
           manifest_path = Path("android/app/src/main/AndroidManifest.xml")
           if manifest_path.exists():
@@ -78,11 +84,30 @@ jobs:
                   block = "\n    aaptOptions {\n        noCompress 'tflite'\n        noCompress 'lite'\n    }\n"
                   text = text.replace("defaultConfig {", block + "    defaultConfig {", 1)
               groovy_path.write_text(text, encoding="utf-8")
-          EOF
 
-      - name: Install dependencies
-        working-directory: ${{ env.APP_DIR }}
-        run: flutter pub get
+          gradle_props = Path("android/gradle.properties")
+          if gradle_props.exists():
+              props_text = gradle_props.read_text(encoding="utf-8")
+              if "kotlin.jvm.target.validation.mode" not in props_text:
+                  props_text += "\nkotlin.jvm.target.validation.mode=warning\n"
+                  gradle_props.write_text(props_text, encoding="utf-8")
+
+          pkg_cfg = Path(".dart_tool/package_config.json")
+          if pkg_cfg.exists():
+              data = json.loads(pkg_cfg.read_text(encoding="utf-8"))
+              for pkg in data.get("packages", []):
+                  root_uri = pkg.get("rootUri", "")
+                  if root_uri.startswith("file://"):
+                      pkg_dir = Path(unquote(urlparse(root_uri).path))
+                      for gfile in [pkg_dir / "android/build.gradle", pkg_dir / "android/build.gradle.kts"]:
+                          if gfile.exists():
+                              gtext = gfile.read_text(encoding="utf-8")
+                              updated = re.sub(r"JavaVersion\.VERSION_(1_8|11)", "JavaVersion.VERSION_17", gtext)
+                              updated = re.sub(r'jvmTarget\s*=\s*["\'](1\.8|11)["\']', 'jvmTarget = "17"', updated)
+                              if updated != gtext:
+                                  gfile.write_text(updated, encoding="utf-8")
+                                  print(f"Aligned JVM target to 17 in {gfile}")
+          EOF
 
       - name: Build Release APK
         working-directory: ${{ env.APP_DIR }}
