@@ -1,0 +1,95 @@
+name: Build MSQ-LiteNet Release APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build_android_apk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Locate Flutter project directory
+        run: |
+          PUBSPEC=$(find . -maxdepth 3 -name "pubspec.yaml" | head -n 1)
+          if [ -z "$PUBSPEC" ]; then
+            echo "pubspec.yaml not found in repository."
+            ls -la
+            exit 1
+          fi
+          APP_DIR=$(dirname "$PUBSPEC")
+          echo "APP_DIR=$APP_DIR" >> $GITHUB_ENV
+
+      - name: Generate Android files
+        working-directory: ${{ env.APP_DIR }}
+        run: flutter create --platforms=android --org com.msqlitenet --project-name msq_litenet_app .
+
+      - name: Configure Android Manifest and Gradle
+        working-directory: ${{ env.APP_DIR }}
+        run: |
+          python3 - << 'EOF'
+          import re
+          from pathlib import Path
+
+          manifest_path = Path("android/app/src/main/AndroidManifest.xml")
+          if manifest_path.exists():
+              text = manifest_path.read_text(encoding="utf-8")
+              perms = [
+                  '<uses-permission android:name="android.permission.CAMERA"/>',
+                  '<uses-permission android:name="android.permission.INTERNET"/>',
+              ]
+              for p in perms:
+                  if p not in text:
+                      text = text.replace("<application", f"    {p}\n    <application", 1)
+              text = re.sub(r'android:label="[^"]*"', 'android:label="MSQ-LiteNet"', text, count=1)
+              manifest_path.write_text(text, encoding="utf-8")
+
+          kts_path = Path("android/app/build.gradle.kts")
+          groovy_path = Path("android/app/build.gradle")
+
+          if kts_path.exists():
+              text = kts_path.read_text(encoding="utf-8")
+              text = re.sub(r"minSdk\s*=\s*[^\n]+", "minSdk = 26", text)
+              if "noCompress" not in text:
+                  block = '\n    androidResources {\n        noCompress += listOf("tflite", "lite")\n    }\n'
+                  text = text.replace("defaultConfig {", block + "    defaultConfig {", 1)
+              kts_path.write_text(text, encoding="utf-8")
+          elif groovy_path.exists():
+              text = groovy_path.read_text(encoding="utf-8")
+              text = re.sub(r"minSdk\s*=?\s*[^\n]+", "minSdk = 26", text)
+              text = re.sub(r"minSdkVersion\s+[^\n]+", "minSdkVersion 26", text)
+              if "noCompress" not in text:
+                  block = "\n    aaptOptions {\n        noCompress 'tflite'\n        noCompress 'lite'\n    }\n"
+                  text = text.replace("defaultConfig {", block + "    defaultConfig {", 1)
+              groovy_path.write_text(text, encoding="utf-8")
+          EOF
+
+      - name: Install dependencies
+        working-directory: ${{ env.APP_DIR }}
+        run: flutter pub get
+
+      - name: Build Release APK
+        working-directory: ${{ env.APP_DIR }}
+        run: flutter build apk --release
+
+      - name: Upload Release APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MSQ-LiteNet-Release-APK
+          path: ${{ env.APP_DIR }}/build/app/outputs/flutter-apk/app-release.apk
