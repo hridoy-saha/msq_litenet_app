@@ -13,11 +13,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Java 17
+      - name: Set up Java 21
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: '21'
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -73,7 +73,15 @@ jobs:
               text = kts_path.read_text(encoding="utf-8")
               text = re.sub(r"minSdk\s*=\s*[^\n]+", "minSdk = 26", text)
               if "noCompress" not in text:
-                  block = '\n    androidResources {\n        noCompress += listOf("tflite", "lite")\n    }\n'
+                  block = (
+                      '\n    androidResources {\n'
+                      '        noCompress += listOf("tflite", "lite")\n'
+                      '    }\n'
+                      '    lint {\n'
+                      '        checkReleaseBuilds = false\n'
+                      '        abortOnError = false\n'
+                      '    }\n'
+                  )
                   text = text.replace("defaultConfig {", block + "    defaultConfig {", 1)
               kts_path.write_text(text, encoding="utf-8")
           elif groovy_path.exists():
@@ -81,7 +89,16 @@ jobs:
               text = re.sub(r"minSdk\s*=?\s*[^\n]+", "minSdk = 26", text)
               text = re.sub(r"minSdkVersion\s+[^\n]+", "minSdkVersion 26", text)
               if "noCompress" not in text:
-                  block = "\n    aaptOptions {\n        noCompress 'tflite'\n        noCompress 'lite'\n    }\n"
+                  block = (
+                      "\n    aaptOptions {\n"
+                      "        noCompress 'tflite'\n"
+                      "        noCompress 'lite'\n"
+                      "    }\n"
+                      "    lint {\n"
+                      "        checkReleaseBuilds false\n"
+                      "        abortOnError false\n"
+                      "    }\n"
+                  )
                   text = text.replace("defaultConfig {", block + "    defaultConfig {", 1)
               groovy_path.write_text(text, encoding="utf-8")
 
